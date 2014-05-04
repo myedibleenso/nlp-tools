@@ -49,10 +49,11 @@ class Tokenizer(object):
 		"""
 		#ensure sentence is a list
 		sentence = sentence.split() if type(sentence) is not list else sentence
+		sentence_length = len(sentence)
 		text = ""
-		for i in range(len(sentence)):	
+		for i in xrange(sentence_length):	
 			w = sentence[i]
-			if self.allPunct(w) and (0 <= i-1 <= len(sentence)) and (i+1 < len(sentence)):
+			if self.allPunct(w) and (0 <= i-1 <= sentence_length) and (i+1 < sentence_length):
 				prev_w = sentence[i-1]
 				next_w = sentence[i+1]
 				if self.allPunct(next_w):
@@ -98,7 +99,6 @@ class Tokenizer(object):
 class Disambiguator(object):
 
 	def __init__(self):
-		self.UNKNOWN = "UNKNOWN"
 		self.stop = True
 		self.stem = True
 
@@ -131,11 +131,10 @@ class Disambiguator(object):
 		else:
 			return None
 
-	def assign_senses(self, words, tags):	
+	def assign_senses(self, words, tags, polysemous_tag="UNKNOWN", closed_class_tag="<closed-class>"):	
 		"""
 		Assign senses for non-polysemous words
 		"""
-		print "Assigning known senses..."
 		wn_tags = [self.get_wordnet_pos(tag) for tag in tags]
 		senses = []
 		for i in xrange(len(wn_tags)):
@@ -144,18 +143,18 @@ class Disambiguator(object):
 				word = words[i]
 				synsets = wn.synsets(word, pos=tag)
 				if len(synsets) > 1:
-					senses.append(self.UNKNOWN)
+					senses.append(polysemous_tag)
 				elif len(synsets) == 1:
 					senses.append(synsets[0].name())
 			else:
-				senses.append("")
+				senses.append(closed_class_tag)
 		return senses
 
 	def polysemous_words(self, sentence):
 		"""
 		return list of polysemous words
 		"""
-		return [(sentence.words[i], self.get_wordnet_pos(sentence.pos_tags[i])) for i in range(len(sentence.senses)) if sentence.senses[i] == self.UNKNOWN]
+		return [(sentence.words[i], self.get_wordnet_pos(sentence.pos_tags[i])) for i in xrange(len(sentence.senses)) if sentence.senses[i] == self.UNKNOWN]
 
 	def get_frames(self, sense):
 		"""
@@ -164,7 +163,7 @@ class Disambiguator(object):
 		synset = wn.synset(sense)
 		frames = set()
 		for lemma in synset.lemmas():
-			for i in range(len(lemma.frame_ids())):
+			for i in xrange(len(lemma.frame_ids())):
 				frame_id = lemma.frame_ids()[i]
 				frame = lemma.frame_strings()[i].replace(lemma.name(), "___")
 				frames.add((frame_id, frame))
@@ -244,7 +243,7 @@ class Disambiguator(object):
 		definition = wn.synset(sense).definition()
 		words = self.flatten(tokenizer.tokenize(definition))
 		tags = tagger(words)
-		return [(words[i], disambiguator.get_wordnet_pos(tags[i])) for i in range(len(tags)) if disambiguator.get_wordnet_pos(tags[i])]
+		return [(words[i], disambiguator.get_wordnet_pos(tags[i])) for i in xrange(len(tags)) if disambiguator.get_wordnet_pos(tags[i])]
 
 	def get_lemmas(self, sense):
 		#wn.synset
@@ -310,17 +309,17 @@ class Disambiguator(object):
 
 		return ranked_synsets if not total else [(score/total, synset) for score, synset in ranked_synsets]
 		
-	def simple_lesk(self, context_sentence, ambiguous_word, pos=None):
+	def simple_lesk(self, context, ambiguous_word, pos=None):
 		"""
 		Modified Lesk algorithm.
 		based on the example by Liling Tan (https://github.com/alvations/pywsd)
 		"""
 		sense_dictionary = {s:set(self.flatten(tokenizer.tokenize(s.definition()))) for s in wn.synsets(ambiguous_word, pos=pos)}
-		ranked_senses = self.compare_overlaps(context_sentence, sense_dictionary)
+		ranked_senses = self.compare_overlaps(context, sense_dictionary)
 		
 		return ranked_senses  
 
-	def modified_lesk(self, context_sentence, ambiguous_word, pos=None):
+	def modified_lesk(self, context, ambiguous_word, pos=None):
 		"""
 		Adapted from Banerjee and Pederson (2002)		
 		based on the example by Liling Tan (https://github.com/alvations/pywsd)
@@ -342,15 +341,21 @@ class Disambiguator(object):
 			for w in signature: 
 				synset_signatures[s].add(w)
 		
-		ranked_senses = self.compare_overlaps(context_sentence, synset_signatures)
+		ranked_senses = self.compare_overlaps(context, synset_signatures)
 		return ranked_senses
+
+	def most_freq_sense(self, ambiguous_word, context=None, pos=None):
+		"""
+		Select the first synset with the specified PoS
+		"""
+		return wn.synsets(ambiguous_word, pos=pos)[0]
 
 	def disambiguate(self, sentence, method=None):
 		"""
 		disambiguate all polysemous words in a sentence
 		"""
 
-		ambiguous_words = [(sentence.words[i], self.get_wordnet_pos(sentence.pos_tags[i]), i) for i in range(len(sentence.senses)) if sentence.senses[i] == self.UNKNOWN] 
+		ambiguous_words = [(sentence.words[i], self.get_wordnet_pos(sentence.pos_tags[i]), i) for i in xrange(sentence.length) if sentence.senses[i] == sentence.UNKNOWN] 
 		
 		#make sure we have some polysemous words
 		if not ambiguous_words: 
@@ -361,17 +366,28 @@ class Disambiguator(object):
 		
 		context_sentence = [stemmer.stem(w) for w in sentence.words] if self.stem else sentence.words
 
-		#display sentence to disambiguate (polysemous elements are shown in uppercase)
-		print " ".join(sentence.words[i].lower() if sentence.senses[i] != self.UNKNOWN else sentence.words[i].upper()for i in range(len(sentence.senses)))
+		#display sentence to disambiguate
+		print sentence.semantic_representation()
 		
+		score = "NA"
+		disambiguated_senses = sentence.senses[:]
 		for (word, tag, i) in ambiguous_words:
-			score, best_sense = method(context_sentence=context_sentence, ambiguous_word=word, pos=tag)[0]
-			print "Word:\t{0}".format(word)
+			
+			try:
+				score, best_sense = method(context=context_sentence, ambiguous_word=word, pos=tag)[0]
+			except:
+				best_sense = method(context=context_sentence, ambiguous_word=word, pos=tag)
+			
+			print "\nWord:\t{0}".format(word)
 			print "Sense:\t{0}".format(best_sense.name())
 			print "Definition:\t{0}".format(best_sense.definition())
-			print "Score:\t{0:.3}\n".format(float(score))
-			sentence.senses[i] = best_sense
-		return sentence
+			
+			disambiguated_senses[i] = best_sense.name()
+		
+		disambiguated_sentence = Sentence(words=sentence.words[:], pos_tags=sentence.pos_tags[:], senses=disambiguated_senses)
+		print "\n"+disambiguated_sentence.semantic_representation()
+		#return the new Sentence
+		return disambiguated_sentence
 
 ######################################
 ######################################
@@ -388,11 +404,12 @@ class Sentence(object):
 		#if not isinstance(words, list):
 		#	raise TypeError("words must be a list")
 		self.UNKNOWN = "UNKNOWN"
+		self.CLOSED_CLASS = "<closed-class>"
 
 		self.words = self.set_words(words)
+		self.length = len(self.words)
 		self.pos_tags = self.set_tags(pos_tags)
 		self.senses = self.set_senses(senses)
-
 
 	def set_words(self, words):
 		if type(words) is list:
@@ -408,28 +425,45 @@ class Sentence(object):
 		try:
 			return pos_tags if pos_tags else tagger(self.words)
 		except:
-			return pos_tags if pos_tags else [self.UNKNOWN]*len(self.words)
+			return pos_tags if pos_tags else [self.UNKNOWN]*self.length
 	
 	def set_senses(self, senses):
-		try:
-			return disambiguator.assign_senses(self.words, self.pos_tags)
-		except:
-			return senses if senses else [self.UNKNOWN] * len(self.words)
+		if type(senses) is list and self.length == len(senses):
+			return senses
 
-	def __repr__(self):
+		try:
+			return disambiguator.assign_senses(words=self.words, tags=self.pos_tags, polysemous_tag=self.UNKNOWN, closed_class_tag=self.CLOSED_CLASS)
+		except:
+			return senses if senses else [self.UNKNOWN] * self.length
+
+	def semantic_representation(self):
+		representation = self.senses[:]
+		for i in xrange(self.length):
+			if self.senses[i] == self.UNKNOWN:
+				representation[i] = self.words[i].upper()
+			elif self.senses[i] == self.CLOSED_CLASS:
+				representation[i] = self.words[i]
+		return " ".join(representation)
+
+	def __str__(self):
 		return ' '.join(self.words)
 
 	def to_string(self):
-		return ' '.join("{w}__{p}__{s}".format(w=self.words[i],p=self.pos_tags[i],s=self.senses[i]) for i in xrange(len(self.words)))
+		return ' '.join("{w}__{p}__{s}".format(w=self.words[i],p=self.pos_tags[i],s=self.senses[i]) for i in xrange(self.length))
 
 	def tuples(self):
 		"""
 		(word, pos, sense)
 		"""
-		return [(self.words[i], self.pos_tags[i], self.senses[i]) for i in xrange(len(self.words))]
+		return [(self.words[i], self.pos_tags[i], self.senses[i]) for i in xrange(self.length)]
 
 if __name__ == '__main__':
-	text = "I hammered 40 nails and now my hand hurts."
-	s = Sentence(text)
-	disambiguator.polysemous_words(s)
-	disambiguator.disambiguate(s)
+	examples = ["I hammered 40 nails and now my hand hurts.", 
+	            "That stereo has great bass.", 
+	            "I caught a huge bass."]
+	for example in examples:
+		s = Sentence(example)
+		disambiguator.polysemous_words(s)
+		disambiguator.disambiguate(s)
+
+

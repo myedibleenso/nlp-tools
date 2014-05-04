@@ -43,6 +43,8 @@ Building on the shoulders of giants...
 - Modify context IR for Lesk-based metrics (hyponyms, hypernyms for all known senses, etc)
 - `word2vec` from semcor data (any other sources?) and sentence similarity measures?
 - Intelligent negation modeling?
+- Add PoS ngrams to Lesk overlap measures?
+- Include known senses in Lesk overlap measures?
 - Context window expansion (ex. +/- n sentences when available)?
 - Include supervised methods?
 - LDA, LSA, etc
