@@ -91,9 +91,8 @@ class Tokenizer(object):
 		text = self.clean(text)
 		tokenized_text = [nltk.tokenize.word_tokenize(sent) for sent in nltk.tokenize.sent_tokenize(text)]
 		#correct tokenization
-		tokenized_text = self.correct_tokenization(tokenized_text)
-		return tokenized_text if len(tokenized_text) > 1 else tokenized_text[0]
-
+		return self.correct_tokenization(tokenized_text)
+		#return tokenized_text if len(tokenized_text) > 1 else tokenized_text[0]
 
 #######################################################
 class Disambiguator(object):
@@ -104,7 +103,17 @@ class Disambiguator(object):
 		self.stem = True
 
 		self.method = self.modified_lesk
-		
+	
+	def flatten(self, somelist):
+		"""
+		credit:
+		http://stackoverflow.com/questions/10823877/what-is-the-fastest-way-to-flatten-arbitrarily-nested-lists-in-python
+		"""
+		for i, x in enumerate(somelist):
+			while isinstance(somelist[i], list):
+				somelist[i:i+1] = somelist[i]
+		return somelist
+
 	def get_wordnet_pos(self, treebank_tag):
 		"""
 		Map Penn treebank-style pos tag 
@@ -139,8 +148,14 @@ class Disambiguator(object):
 				elif len(synsets) == 1:
 					senses.append(synsets[0].name())
 			else:
-				senses.append(None)
+				senses.append("")
 		return senses
+
+	def polysemous_words(self, sentence):
+		"""
+		return list of polysemous words
+		"""
+		return [(sentence.words[i], self.get_wordnet_pos(sentence.pos_tags[i])) for i in range(len(sentence.senses)) if sentence.senses[i] == self.UNKNOWN]
 
 	def get_frames(self, sense):
 		"""
@@ -205,6 +220,11 @@ class Disambiguator(object):
 		if synset.instance_hyponyms():
 			print "{0}:\t{1}".format("causes", ', '.join([s.name() for s in synset.causes()]))		
 
+	def senses_summary(self, word, pos):
+		for s in wn.synsets(word, pos=pos): 
+			examples = '\n\t\t'.join(e for e in s.examples())
+			print "name:\t\t{0}\ndef:\t\t{1}\nexamples:\t{2}\n".format(s.name(), s.definition(), examples)
+
 	def compare_synsets(self, synset1, synset2, metric=wn.wup_similarity, metric_options=dict()):
 		"""
 		compute similarity
@@ -222,7 +242,7 @@ class Disambiguator(object):
 
 	def find_related(self, sense):
 		definition = wn.synset(sense).definition()
-		words = tokenizer.tokenize(definition)
+		words = self.flatten(tokenizer.tokenize(definition))
 		tags = tagger(words)
 		return [(words[i], disambiguator.get_wordnet_pos(tags[i])) for i in range(len(tags)) if disambiguator.get_wordnet_pos(tags[i])]
 
@@ -243,26 +263,31 @@ class Disambiguator(object):
 		"""
 		synset_signatures = dict()
 		
-		for s in wn.synsets(ambiguous_word, pos=pos):
-			
+		for synset in wn.synsets(ambiguous_word, pos=pos):
 			signature = []
 			#definition
-			signature += tokenizer.tokenize(s.definition())
+			signature += self.flatten(tokenizer.tokenize(synset.definition()))
 			#examples
-			signature += chain(*[tokenizer.tokenize(e) for e in s.examples()])
+			signature += self.flatten([tokenizer.tokenize(e) for e in synset.examples()])
 			#lemma names
-			signature += s.lemma_names()
+			signature += synset.lemma_names()
 			#lemma names of hypernyms and hyponyms
-			signature += chain(*(i.lemma_names() for i in s.hypernyms() + s.hyponyms()))
+			signature += self.flatten([s.lemma_names() for s in synset.hypernyms() + synset.hyponyms()])
 			
 			# Optional: removes stopwords.
-			if self.stop:
-				signature = [i for i in signature if i not in stopwords.words('english')]    
+			if self.stop and signature:
+				try:
+					signature = [i for i in signature if i not in stopwords.words('english')]    
+				except:
+					pass
 			# Matching exact words causes sparsity, so optional matching for stems.
-			if self.stem: 
-				signature = [stemmer.stem(w) for w in signature]
-			
-			synset_signatures[s] = set(signature)
+			if self.stem and signature: 
+				try:
+					signature = [stemmer.stem(w) for w in signature]
+				except:
+					pass
+
+			synset_signatures[synset] = set(signature) if signature else set()
 		
 		return synset_signatures
 
@@ -282,14 +307,15 @@ class Disambiguator(object):
 		
 		# Normalize scores. 
 		total = sum(score for score, synset in ranked_synsets)
-		return [(score/total, synset) for score, synset in ranked_synsets]
+
+		return ranked_synsets if not total else [(score/total, synset) for score, synset in ranked_synsets]
 		
 	def simple_lesk(self, context_sentence, ambiguous_word, pos=None):
 		"""
 		Modified Lesk algorithm.
 		based on the example by Liling Tan (https://github.com/alvations/pywsd)
 		"""
-		sense_dictionary = {s:set(tokenizer.tokenize(s.definition())) for s in wn.synsets(ambiguous_word, pos=pos)}
+		sense_dictionary = {s:set(self.flatten(tokenizer.tokenize(s.definition()))) for s in wn.synsets(ambiguous_word, pos=pos)}
 		ranked_senses = self.compare_overlaps(context_sentence, sense_dictionary)
 		
 		return ranked_senses  
@@ -301,13 +327,14 @@ class Disambiguator(object):
 		"""
 		# Get the signatures for each synset.
 		synset_signatures = self.semantic_signature(ambiguous_word, pos)
+
 		for s in synset_signatures:
 			related_senses = list(set(s.member_holonyms() + s.member_meronyms() + 
 									  s.part_meronyms() + s.part_holonyms() + 
 									  s.similar_tos() + s.substance_holonyms() + 
 									  s.substance_meronyms()))
 			
-			signature = list([w for w in chain(*[r.lemma_names() for r in related_senses]) if w not in stopwords.words('english')])    
+			signature = [w for w in self.flatten([r.lemma_names() for r in related_senses]) if w not in stopwords.words('english')]
 
 			#stem matches
 			signature = [stemmer.stem(w) for w in signature]
@@ -315,19 +342,16 @@ class Disambiguator(object):
 			for w in signature: 
 				synset_signatures[s].add(w)
 		
-		# Disambiguate the sense in context.
-		context_sentence = {stemmer.stem(w) for w in context_sentence}
-		
 		ranked_senses = self.compare_overlaps(context_sentence, synset_signatures)
 		return ranked_senses
 
-	def disambiguate(self, sentence, stem=True, method=None):
+	def disambiguate(self, sentence, method=None):
 		"""
 		disambiguate all polysemous words in a sentence
 		"""
 		method = self.method if not method else method
 		print "Disambiguating sentence with {0}...".format(method.__name__)
-		context_sentence = [stemmer.stem(w) for w in sentence.words] if stem else sentence.words
+		context_sentence = [stemmer.stem(w) for w in sentence.words] if self.stem else sentence.words
 
 		ambiguous_words = [(sentence.words[i], self.get_wordnet_pos(sentence.pos_tags[i]), i) for i in range(len(sentence.senses)) if sentence.senses[i] == self.UNKNOWN] 
 		
@@ -338,7 +362,7 @@ class Disambiguator(object):
 			print "word:\t{0}".format(word)
 			print "sense:\t{0}".format(best_sense.name())
 			print "definition:\t{0}".format(best_sense.definition())
-			print "score:\t{0:.3}\n".format(score)
+			print "score:\t{0:.3}\n".format(float(score))
 			sentence.senses[i] = best_sense
 		return sentence
 
@@ -364,7 +388,14 @@ class Sentence(object):
 
 
 	def set_words(self, words):
-		return words if type(words) is list else tokenizer.tokenize(words)
+		if type(words) is list:
+			return words
+
+		sentences = tokenizer.tokenize(words)
+		if len(sentences) > 1:
+			raise Exception("More than one sentence detected in text!")
+		else:
+			return sentences[0]
 
 	def set_tags(self, pos_tags):
 		try:
@@ -390,3 +421,8 @@ class Sentence(object):
 		"""
 		return [(self.words[i], self.pos_tags[i], self.senses[i]) for i in xrange(len(self.words))]
 
+if __name__ == '__main__':
+	text = "I hammered 40 nails and now my hand hurts."
+	s = Sentence(text)
+	disambiguator.polysemous_words(s)
+	disambiguator.disambiguate(s)
