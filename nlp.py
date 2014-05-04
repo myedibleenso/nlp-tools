@@ -362,12 +362,11 @@ class Disambiguator(object):
 			return sentence
 
 		method = self.method if not method else method
-		print "Disambiguating sentence with {0}...\n".format(method.__name__)
+		
+		#display sentence to disambiguate
+		print "\nDisambiguating \"{0}\" with {1}...".format(sentence.semantic_representation(), method.__name__)
 		
 		context_sentence = [stemmer.stem(w) for w in sentence.words] if self.stem else sentence.words
-
-		#display sentence to disambiguate
-		print sentence.semantic_representation()
 		
 		score = "NA"
 		disambiguated_senses = sentence.senses[:]
@@ -378,14 +377,16 @@ class Disambiguator(object):
 			except:
 				best_sense = method(context=context_sentence, ambiguous_word=word, pos=tag)
 			
-			print "\nWord:\t{0}".format(word)
-			print "Sense:\t{0}".format(best_sense.name())
+			print "\nWord:\t\t{0}".format(word)
+			print "Sense:\t\t{0}".format(best_sense.name())
 			print "Definition:\t{0}".format(best_sense.definition())
 			
 			disambiguated_senses[i] = best_sense.name()
 		
 		disambiguated_sentence = Sentence(words=sentence.words[:], pos_tags=sentence.pos_tags[:], senses=disambiguated_senses)
-		print "\n"+disambiguated_sentence.semantic_representation()
+		
+		print "\n",disambiguated_sentence
+		print disambiguated_sentence.semantic_representation()
 		#return the new Sentence
 		return disambiguated_sentence
 
