@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 from __future__ import unicode_literals, division
+from nltk.stem import PorterStemmer
 from nltk.corpus import wordnet as wn
+from nltk.corpus import stopwords
+from itertools import chain
 import nltk
 import re
 
@@ -22,6 +25,8 @@ token_pattern = r'''(?x)              # set flag to allow verbose regexps
 				| \#+[\w_]+[\w\'_\-]*[\w_]+ # hashtags
 				| [.,;"'?():-_`]            # these are separate tokens
 				'''
+
+######################################
 
 class Tokenizer(object):
 	def __init__(self):
@@ -90,12 +95,21 @@ class Tokenizer(object):
 		return tokenized_text if len(tokenized_text) > 1 else tokenized_text[0]
 
 
+#######################################################
 class Disambiguator(object):
 
 	def __init__(self):
-		pass
+		self.UNKNOWN = "UNKNOWN"
+		self.stop = True
+		self.stem = True
+
+		self.method = self.modified_lesk
 		
 	def get_wordnet_pos(self, treebank_tag):
+		"""
+		Map Penn treebank-style pos tag 
+		to wordnet pos tag
+		"""
 
 		if treebank_tag.startswith('J'):
 			return wn.ADJ
@@ -109,24 +123,29 @@ class Disambiguator(object):
 			return None
 
 	def assign_senses(self, words, tags):	
+		"""
+		Assign senses for non-polysemous words
+		"""
+		print "Assigning known senses..."
 		wn_tags = [self.get_wordnet_pos(tag) for tag in tags]
 		senses = []
 		for i in xrange(len(wn_tags)):
 			tag = wn_tags[i]
 			if tag:
 				word = words[i]
-				print "word: {0}\ttag: {1}".format(word, tag)
 				synsets = wn.synsets(word, pos=tag)
 				if len(synsets) > 1:
-					senses.append("UNKNOWN")
+					senses.append(self.UNKNOWN)
 				elif len(synsets) == 1:
 					senses.append(synsets[0].name())
 			else:
 				senses.append(None)
-		print senses
 		return senses
 
 	def get_frames(self, sense):
+		"""
+		Retrieves frames
+		"""
 		synset = wn.synset(sense)
 		frames = set()
 		for lemma in synset.lemmas():
@@ -137,6 +156,10 @@ class Disambiguator(object):
 		return sorted(list(frames), key=lambda (frame_id, frame): frame_id)
 
 	def semantic_profile(self, sense):
+		"""
+		Print a summary of wordnet-derived semantic information 
+		available for a given sense
+		"""
 		synset = wn.synset(sense)
 		name_value_pairs = []
 		# All the available synset methods:
@@ -182,6 +205,21 @@ class Disambiguator(object):
 		if synset.instance_hyponyms():
 			print "{0}:\t{1}".format("causes", ', '.join([s.name() for s in synset.causes()]))		
 
+	def compare_synsets(self, synset1, synset2, metric=wn.wup_similarity, metric_options=dict()):
+		"""
+		compute similarity
+		"""
+		scores = list()
+		for s1 in synset1:
+			for s2 in synset2:
+				scores.append((s1, s2, metric(s1, s2, **metric_options)))
+		scores = sorted(scores, key=lambda (s1, s2, score): score)
+		for (s1, s2, score) in scores:
+			print "{0}:\t{1}".format(s1.name(), s1.definition())
+			print "{0}:\t{1}".format(s2.name(), s2.definition())
+			print "{0}:\t{1:.3}\n".format(metric.__name__, score)
+		return max(scores, key=lambda x:x[-1])
+
 	def find_related(self, sense):
 		definition = wn.synset(sense).definition()
 		words = tokenizer.tokenize(definition)
@@ -200,23 +238,130 @@ class Disambiguator(object):
 				related.add(r)
 		return related
 
-	def disambiguate(self, sentence):
-		pass
+	def semantic_signature(self, ambiguous_word, pos=None):
+		""" 
+		"""
+		synset_signatures = dict()
+		
+		for s in wn.synsets(ambiguous_word, pos=pos):
+			
+			signature = []
+			#definition
+			signature += tokenizer.tokenize(s.definition())
+			#examples
+			signature += chain(*[tokenizer.tokenize(e) for e in s.examples()])
+			#lemma names
+			signature += s.lemma_names()
+			#lemma names of hypernyms and hyponyms
+			signature += chain(*(i.lemma_names() for i in s.hypernyms() + s.hyponyms()))
+			
+			# Optional: removes stopwords.
+			if self.stop:
+				signature = [i for i in signature if i not in stopwords.words('english')]    
+			# Matching exact words causes sparsity, so optional matching for stems.
+			if self.stem: 
+				signature = [stemmer.stem(w) for w in signature]
+			
+			synset_signatures[s] = set(signature)
+		
+		return synset_signatures
 
+	def compare_overlaps(self, context, synset_signatures):
+		""" 
+		Calculates overlaps between the context sentence and the synset_signature
+		and returns a ranked list of synsets from highest overlap to lowest.
+		"""
+		overlapping_synsets = [] # a tuple of (len(overlap), synset).
+		context = set(context)
+		for s in synset_signatures:
+			overlaps = synset_signatures[s].intersection(context)
+			overlapping_synsets.append((len(overlaps), s))
+
+		# Rank synsets from highest to lowest overlap.
+		ranked_synsets = sorted(overlapping_synsets, reverse=True)
+		
+		# Normalize scores. 
+		total = sum(score for score, synset in ranked_synsets)
+		return [(score/total, synset) for score, synset in ranked_synsets]
+		
+	def simple_lesk(self, context_sentence, ambiguous_word, pos=None):
+		"""
+		Modified Lesk algorithm.
+		based on the example by Liling Tan (https://github.com/alvations/pywsd)
+		"""
+		sense_dictionary = {s:set(tokenizer.tokenize(s.definition())) for s in wn.synsets(ambiguous_word, pos=pos)}
+		ranked_senses = self.compare_overlaps(context_sentence, sense_dictionary)
+		
+		return ranked_senses  
+
+	def modified_lesk(self, context_sentence, ambiguous_word, pos=None):
+		"""
+		Adapted from Banerjee and Pederson (2002)		
+		based on the example by Liling Tan (https://github.com/alvations/pywsd)
+		"""
+		# Get the signatures for each synset.
+		synset_signatures = self.semantic_signature(ambiguous_word, pos)
+		for s in synset_signatures:
+			related_senses = list(set(s.member_holonyms() + s.member_meronyms() + 
+									  s.part_meronyms() + s.part_holonyms() + 
+									  s.similar_tos() + s.substance_holonyms() + 
+									  s.substance_meronyms()))
+			
+			signature = list([w for w in chain(*[r.lemma_names() for r in related_senses]) if w not in stopwords.words('english')])    
+
+			#stem matches
+			signature = [stemmer.stem(w) for w in signature]
+
+			for w in signature: 
+				synset_signatures[s].add(w)
+		
+		# Disambiguate the sense in context.
+		context_sentence = {stemmer.stem(w) for w in context_sentence}
+		
+		ranked_senses = self.compare_overlaps(context_sentence, synset_signatures)
+		return ranked_senses
+
+	def disambiguate(self, sentence, stem=True, method=None):
+		"""
+		disambiguate all polysemous words in a sentence
+		"""
+		method = self.method if not method else method
+		print "Disambiguating sentence with {0}...".format(method.__name__)
+		context_sentence = [stemmer.stem(w) for w in sentence.words] if stem else sentence.words
+
+		ambiguous_words = [(sentence.words[i], self.get_wordnet_pos(sentence.pos_tags[i]), i) for i in range(len(sentence.senses)) if sentence.senses[i] == self.UNKNOWN] 
+		
+		if not ambiguous_words: return sentence
+
+		for (word, tag, i) in ambiguous_words:
+			score, best_sense = method(context_sentence=context_sentence, ambiguous_word=word, pos=tag)[0]
+			print "word:\t{0}".format(word)
+			print "sense:\t{0}".format(best_sense.name())
+			print "definition:\t{0}".format(best_sense.definition())
+			print "score:\t{0:.3}\n".format(score)
+			sentence.senses[i] = best_sense
+		return sentence
+
+######################################
 ######################################
 #tagger = nltk.pos_tag
 tagger = lambda words: [t for (w,t) in nltk.pos_tag(words)]
 tokenizer = Tokenizer()
 disambiguator = Disambiguator()
+stemmer = PorterStemmer()
+######################################
 ######################################
 
 class Sentence(object):
 	def __init__(self, words, pos_tags=None, senses=None):
 		#if not isinstance(words, list):
 		#	raise TypeError("words must be a list")
+		self.UNKNOWN = "UNKNOWN"
+
 		self.words = self.set_words(words)
 		self.pos_tags = self.set_tags(pos_tags)
 		self.senses = self.set_senses(senses)
+
 
 	def set_words(self, words):
 		return words if type(words) is list else tokenizer.tokenize(words)
@@ -225,16 +370,16 @@ class Sentence(object):
 		try:
 			return pos_tags if pos_tags else tagger(self.words)
 		except:
-			return pos_tags if pos_tags else ["UNKNOWN"]*len(self.words)
+			return pos_tags if pos_tags else [self.UNKNOWN]*len(self.words)
 	
 	def set_senses(self, senses):
 		try:
 			return disambiguator.assign_senses(self.words, self.pos_tags)
 		except:
-			return senses if senses else [""] * len(self.words)
+			return senses if senses else [self.UNKNOWN] * len(self.words)
 
 	def __repr__(self):
-		return ' '.join("{w}__{p}__{s}".format(w=self.words[i],p=self.pos_tags[i],s=self.senses[i]) for i in xrange(len(self.words)))
+		return ' '.join(self.words)
 
 	def to_string(self):
 		return ' '.join("{w}__{p}__{s}".format(w=self.words[i],p=self.pos_tags[i],s=self.senses[i]) for i in xrange(len(self.words)))
