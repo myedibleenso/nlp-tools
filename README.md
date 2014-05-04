@@ -56,17 +56,21 @@ Building on the shoulders of giants...
 
 - Lesk (1986) based models for WSD adapted from Liling Tan's [`pywsd`](https://github.com/alvations/pywsd) implementation.
  <p>
- ```latex
- @misc{pywsd14,
+
+```
+@misc{pywsd14,
  	author = {Liling Tan},
  	title = {Pywsd: Python Implementations of Word Sense Disambiguation (WSD) Technologies},
  	howpublished = {https://github.com/alvations/pywsd}},
  	year = {2014}
-}```
+}
+```
 
 - [`NLTK 3`](https://github.com/nltk/nltk) is the nlp backbone supporting this.
-   <p>```latex
- @inproceedings{Loper:2002:NNL:1118108.1118117,
+   <p>
+
+```
+@inproceedings{Loper:2002:NNL:1118108.1118117,
     author = {Loper, Edward and Bird, Steven},
     title = {NLTK: The Natural Language Toolkit},
     booktitle = {Proceedings of the ACL-02 Workshop on Effective Tools and Methodologies for Teaching Natural Language Processing and Computational Linguistics - Volume 1},
@@ -80,5 +84,6 @@ Building on the shoulders of giants...
     acmid = {1118117},
     publisher = {Association for Computational Linguistics},
     address = {Stroudsburg, PA, USA},
-} ```
+} 
+```
 
