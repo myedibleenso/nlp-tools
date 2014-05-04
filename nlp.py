@@ -349,20 +349,27 @@ class Disambiguator(object):
 		"""
 		disambiguate all polysemous words in a sentence
 		"""
-		method = self.method if not method else method
-		print "Disambiguating sentence with {0}...".format(method.__name__)
-		context_sentence = [stemmer.stem(w) for w in sentence.words] if self.stem else sentence.words
 
 		ambiguous_words = [(sentence.words[i], self.get_wordnet_pos(sentence.pos_tags[i]), i) for i in range(len(sentence.senses)) if sentence.senses[i] == self.UNKNOWN] 
 		
-		if not ambiguous_words: return sentence
+		#make sure we have some polysemous words
+		if not ambiguous_words: 
+			return sentence
 
+		method = self.method if not method else method
+		print "Disambiguating sentence with {0}...\n".format(method.__name__)
+		
+		context_sentence = [stemmer.stem(w) for w in sentence.words] if self.stem else sentence.words
+
+		#display sentence to disambiguate (polysemous elements are shown in uppercase)
+		print " ".join(sentence.words[i].lower() if sentence.senses[i] != self.UNKNOWN else sentence.words[i].upper()for i in range(len(sentence.senses)))
+		
 		for (word, tag, i) in ambiguous_words:
 			score, best_sense = method(context_sentence=context_sentence, ambiguous_word=word, pos=tag)[0]
-			print "word:\t{0}".format(word)
-			print "sense:\t{0}".format(best_sense.name())
-			print "definition:\t{0}".format(best_sense.definition())
-			print "score:\t{0:.3}\n".format(float(score))
+			print "Word:\t{0}".format(word)
+			print "Sense:\t{0}".format(best_sense.name())
+			print "Definition:\t{0}".format(best_sense.definition())
+			print "Score:\t{0:.3}\n".format(float(score))
 			sentence.senses[i] = best_sense
 		return sentence
 
