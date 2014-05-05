@@ -4,6 +4,8 @@ from nltk.stem import PorterStemmer
 from nltk.corpus import wordnet as wn
 from nltk.corpus import stopwords
 from itertools import chain
+from nltk.corpus import semcor
+from collections import defaultdict
 import nltk
 import re
 
@@ -114,6 +116,35 @@ class Disambiguator(object):
 				somelist[i:i+1] = somelist[i]
 		return somelist
 
+	def semcor_sentences(self, labeled=True):
+		sentences = []
+		for s in semcor.tagged_sents(tag="both"):
+			triplets = []
+			for w in s:
+				sense = self.clean_sense(w.label())
+				triplets += [(sense, w, self.clean_pos(w, p)) for (w,p) in w.pos()]
+
+			senses, words, tags = zip(*triplets)			
+
+			if labeled:
+				sentence = Sentence(words=words, pos_tags=tags, senses=self.clean_labels(senses))
+			#for testing
+			else:
+				sentence = Sentence(words=words, pos_tags=tags)
+			
+			sentences.append(sentence)
+		return sentences
+
+	def clean_sense(self, sense):
+		return Sentence.CLOSED_CLASS if (not sense or sense == sense.upper()) else sense
+	
+	def clean_pos(self, word, tag):
+		return tag or word
+
+	def clean_labels(self, senses):
+		return [s if s != None else Sentence.CLOSED_CLASS for s in senses]
+		return senses
+
 	def get_wordnet_pos(self, treebank_tag):
 		"""
 		Map Penn treebank-style pos tag 
@@ -131,6 +162,9 @@ class Disambiguator(object):
 		else:
 			return None
 
+	def sterilize_word(self, word):
+		return word.replace("-","") if not wn.synsets(word) else word
+
 	def assign_senses(self, words, tags, polysemous_tag="UNKNOWN", closed_class_tag="<closed-class>"):	
 		"""
 		Assign senses for non-polysemous words
@@ -140,12 +174,15 @@ class Disambiguator(object):
 		for i in xrange(len(wn_tags)):
 			tag = wn_tags[i]
 			if tag:
-				word = words[i]
+				word = self.sterilize_word(words[i])
 				synsets = wn.synsets(word, pos=tag)
 				if len(synsets) > 1:
 					senses.append(polysemous_tag)
 				elif len(synsets) == 1:
 					senses.append(synsets[0].name())
+				#if there are no synsets, assume it is a closed-class word...
+				else:
+					senses.append(closed_class_tag)
 			else:
 				senses.append(closed_class_tag)
 		return senses
@@ -154,7 +191,7 @@ class Disambiguator(object):
 		"""
 		return list of polysemous words
 		"""
-		return [(sentence.words[i], self.get_wordnet_pos(sentence.pos_tags[i])) for i in xrange(len(sentence.senses)) if sentence.senses[i] == self.UNKNOWN]
+		return [(sentence.words[i], self.get_wordnet_pos(sentence.pos_tags[i])) for i in xrange(len(sentence.senses)) if sentence.senses[i] == sentence.UNKNOWN]
 
 	def get_frames(self, sense):
 		"""
@@ -390,6 +427,97 @@ class Disambiguator(object):
 		#return the new Sentence
 		return disambiguated_sentence
 
+
+######################################
+class Performance(object):
+
+	def __init__(self, gold_labels, experimental_labels):
+		self.gold_labels = old_labels
+		self.experimental_labels = experimental_labels
+		self.accuracy = self.accuracy()
+
+	def accuracy(self):
+		total = len(self.gold_labels)
+		right = sum(1 for i in xrange(total) if self.gold_labels[i] == self.experimental_labels[i])
+		wrong = total - right
+		return right/total if right else 1
+
+################################################
+class SemcorExperiment(object):
+	
+	def __init__(self):
+		print "Generating sense-annotated semcor sentences..."
+		self.gold = disambiguator.semcor_sentences()
+		print "Generating experimental semcor sentences..."
+		self.experimental = disambiguator.semcor_sentences(labeled=False)
+		print "Indexing potential ambiguities..."
+		self.test_indices = self.get_mismatch_indices()
+		self.total = sum(len(indices) for indices in self.experimental_indices)
+	
+	def get_mismatch_indices(self):
+		"""
+		get indices of sense mismatches
+		"""
+		indices = list()
+		for i in xrange(len(self.gold)):
+			g = self.gold[i]
+			e = self.experimental[i]
+			print "index: {0}".format(i)
+			print "gold:\n\twords: {0}\n\ttags: {1}\n\tsenses: {2}\n\tnum senses: {3}".format(g, ' '.join(g.pos_tags), ' '.join(g.senses), len(g.senses))
+			print "experimental:\n\twords: {0}\n\ttags: {1}\n\tsenses: {2}\n\tnum senses: {3}".format(e, ' '.join(e.pos_tags), ' '.join(e.senses), len(e.senses))
+			print
+			raw_input("OK?")
+			if len(g.senses) != len(e.senses):
+				raw_input("Mismatch!")
+			mismatches = tuple(idx for idx in xrange(len(g.senses)) if g.senses[idx] != e.senses[idx])
+			indices.append(mismatches)
+
+		return indices
+
+	def compare_labels(self, gold, experimental, indices=None):
+		"""
+		compare the labels of two sentences
+		"""
+
+		mismatches = 0 
+		#list of triplets (word, gold sense, experimental sense)
+		error_list = list()
+		
+		#check if we have indices
+		indices = indices or xrange(len(gold.senses))
+
+		for i in indices:
+			if gold.senses[i] != experimental.senses[i]:
+				mismatches += 1
+				error_list.append((gold.words[i], gold.senses[i], experimental.senses[i]))
+		
+		return mismatches, error_list
+
+	def semcor_baseline(self, experimental):
+		"""
+		Check accuracy of baseline WSD method (i.e. select most common sense)
+		"""
+		mismatches = 0 
+		mismatch_dict = defaultdict(int)
+		
+		for i in xrange(len(self.test_indices)):
+			g = self.gold[i]
+			e = self.experimental[i]
+			indices = self.test_indices
+			new_e = disambiguator.disambiguator(method=disambiguator.most_freq_sense)
+			error_count, errors = self.compare_labels(gold=g, experimental=e, indices=indices)
+			#increment error count
+			mismatches += error_count
+			#store any errors
+			if errors:
+				for e in errors:
+					mismatch_dict[e]+=1
+
+		accuracy = mismatches/self.total if mismatches else 1
+		#report accuracy and errors
+		return accuracy, mismatch_dict
+
+
 ######################################
 ######################################
 #tagger = nltk.pos_tag
@@ -401,11 +529,13 @@ stemmer = PorterStemmer()
 ######################################
 
 class Sentence(object):
+	
+	UNKNOWN = "UNKNOWN"
+	CLOSED_CLASS = "<closed-class>"
+	
 	def __init__(self, words, pos_tags=None, senses=None):
 		#if not isinstance(words, list):
 		#	raise TypeError("words must be a list")
-		self.UNKNOWN = "UNKNOWN"
-		self.CLOSED_CLASS = "<closed-class>"
 
 		self.words = self.set_words(words)
 		self.length = len(self.words)
@@ -413,8 +543,8 @@ class Sentence(object):
 		self.senses = self.set_senses(senses)
 
 	def set_words(self, words):
-		if type(words) is list:
-			return words
+		if type(words) in [list, tuple]:
+			return words if type(words) is tuple else tuple(words)
 
 		sentences = tokenizer.tokenize(words)
 		if len(sentences) > 1:
@@ -466,5 +596,4 @@ if __name__ == '__main__':
 		s = Sentence(example)
 		disambiguator.polysemous_words(s)
 		disambiguator.disambiguate(s)
-
 
