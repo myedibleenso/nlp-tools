@@ -466,7 +466,6 @@ class SemcorExperiment(object):
 			print "gold:\n\twords: {0}\n\ttags: {1}\n\tsenses: {2}\n\tnum senses: {3}".format(g, ' '.join(g.pos_tags), ' '.join(g.senses), len(g.senses))
 			print "experimental:\n\twords: {0}\n\ttags: {1}\n\tsenses: {2}\n\tnum senses: {3}".format(e, ' '.join(e.pos_tags), ' '.join(e.senses), len(e.senses))
 			print
-			raw_input("OK?")
 			if len(g.senses) != len(e.senses):
 				raw_input("Mismatch!")
 			mismatches = tuple(idx for idx in xrange(len(g.senses)) if g.senses[idx] != e.senses[idx])
