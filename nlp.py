@@ -385,7 +385,11 @@ class Disambiguator(object):
 		"""
 		Select the first synset with the specified PoS
 		"""
-		return wn.synsets(ambiguous_word, pos=pos)[0]
+		try:
+			return wn.synsets(ambiguous_word, pos=pos)[0]
+			return wn.synsets(ambiguous_word)[0]
+		except:
+			return "UNKNOWN"
 
 	def disambiguate(self, sentence, method=None):
 		"""
@@ -452,7 +456,7 @@ class SemcorExperiment(object):
 		self.experimental = disambiguator.semcor_sentences(labeled=False)
 		print "Indexing potential ambiguities..."
 		self.test_indices = self.get_mismatch_indices()
-		self.total = sum(len(indices) for indices in self.experimental_indices)
+		self.total = sum(len(indices) for indices in self.test_indices)
 	
 	def get_mismatch_indices(self):
 		"""
@@ -492,7 +496,7 @@ class SemcorExperiment(object):
 		
 		return mismatches, error_list
 
-	def semcor_baseline(self, experimental):
+	def semcor_baseline(self):
 		"""
 		Check accuracy of baseline WSD method (i.e. select most common sense)
 		"""
@@ -503,8 +507,8 @@ class SemcorExperiment(object):
 			g = self.gold[i]
 			e = self.experimental[i]
 			indices = self.test_indices
-			new_e = disambiguator.disambiguator(method=disambiguator.most_freq_sense)
-			error_count, errors = self.compare_labels(gold=g, experimental=e, indices=indices)
+			new_e = disambiguator.disambiguate(sentence=e, method=disambiguator.most_freq_sense)
+			error_count, errors = self.compare_labels(gold=g, experimental=e, indices=indices[i])
 			#increment error count
 			mismatches += error_count
 			#store any errors
