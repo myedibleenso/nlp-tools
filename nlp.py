@@ -6,6 +6,7 @@ from nltk.corpus import stopwords
 from itertools import chain
 from nltk.corpus import semcor
 from collections import defaultdict, Counter
+import unittest
 import nltk
 import re
 
@@ -99,6 +100,7 @@ class Tokenizer(object):
 
 #######################################################
 class Disambiguator(object):
+	UNSPECIFIED = "<unspecified>"
 
 	def __init__(self):
 		self.verbose = True
@@ -126,8 +128,8 @@ class Disambiguator(object):
 		for s in semcor.tagged_sents(tag="both"):
 			triplets = []
 			for w in s:
-				sense = self.clean_sense(w.label())
-				triplets += [(self.sense_pos(sense=sense, tag=p), w, self.clean_pos(w, p)) for (w,p) in w.pos()]
+				sense = w.label()
+				triplets += [(self.check_sense(sense=sense, word=w, tag=self.clean_pos(w, p)), w, self.clean_pos(w, p)) for (w,p) in w.pos()]
 
 			senses, words, tags = zip(*triplets)			
 
@@ -140,21 +142,64 @@ class Disambiguator(object):
 			sentences.append(sentence)
 		return sentences
 
-	def clean_sense(self, sense):
-		return Sentence.CLOSED_CLASS if (not sense or sense == sense.upper()) else sense
+	def get_synsets(self, word, tag=None):
+		"""
+		retrieve synsets for the specified PoS
+		"""
+		#self.yap("getting synsets for {0}...".format(word))
+		return wn.synsets(word, pos=tag) if tag != wn.ADJ else self.get_adj_synsets(word)
 	
-	def sense_pos(self, sense, tag):
+	def get_adj_synsets(self, word):
 		"""
-		include PoS in wordnet sense
+		Get adjective synsets
 		"""
-		return sense if sense == Sentence.CLOSED_CLASS else ".{0}.".format(self.get_wordnet_pos(tag)).join(sense.split("."))
+		#self.yap("getting adj synsets for {0}...".format(word))
+		return [s for s in wn.synsets(word) if s.pos() == wn.ADJ_SAT or s.pos() == wn.ADJ]
+	
+	def check_sense(self, sense, word, tag):
+		
+		# see if the sense exists in wordnet DB
+		try:
+			if wn.synset(sense):
+				has_sense = True
+		except:
+			has_sense = False
+
+		# retrieve all possible synsets for a word...
+		synsets = self.get_synsets(word)
+
+		# case 1: If the specified synset doesn't exist 
+		#         and the word has no synsets...
+		if not synsets and not has_sense:
+			return Sentence.CLOSED_CLASS
+
+		# case 2: If the specified synset exists...
+		elif has_sense:
+			return sense
+
+		# case 3: Is the word an adjective?  
+		#         If so, something might be wrong 
+		#         with the synset formatting...
+		elif self.get_wordnet_pos(tag) == wn.ADJ:
+			adj_sense = ".a.".join(sense.split("."))
+			adj_SAT_sense = ".s.".join(split("."))
+			matching_adj_senses = [s.name() for s in synsets if s.name() in [adj_sense, adj_SAT_sense]]
+			
+			# inspect the adj senses that match the PoS-corrected sense representation
+			if matching_adj_senses:
+
+				if len(matching_adj_senses) == 1:
+					return matching_adj_senses[0]
+				# if there is more than one match, we cannot determine the actual label
+				else:
+					return self.UNSPECIFIED
 
 	def clean_pos(self, word, tag):
+		"""
+		"""
 		return tag or word
 
 	def clean_labels(self, senses):
-#		if not s:
-#			print word
 		return [s if s != None else Sentence.CLOSED_CLASS for s in senses]
 		return senses
 
@@ -176,19 +221,23 @@ class Disambiguator(object):
 			return None
 
 	def sterilize_word(self, word):
+		#self.yap("sterilizing {0}...".format(word))
 		return word.replace("-","") if not wn.synsets(word) else word
 
-	def assign_senses(self, words, tags, polysemous_tag="UNKNOWN", closed_class_tag="<closed-class>"):	
+	def assign_senses(self, words, tags):	
 		"""
 		Assign senses for non-polysemous words
 		"""
+		polysemous_tag = Sentence.UNKNOWN
+		closed_class_tag = Sentence.CLOSED_CLASS
+
 		wn_tags = [self.get_wordnet_pos(tag) for tag in tags]
 		senses = []
 		for i in xrange(len(wn_tags)):
-			tag = wn_tags[i]
-			if tag:
+			wordnet_tag = wn_tags[i]
+			if wordnet_tag:
 				word = self.sterilize_word(words[i])
-				synsets = wn.synsets(word, pos=tag)
+				synsets = self.get_synsets(word, tag=wordnet_tag)
 				if len(synsets) > 1:
 					senses.append(polysemous_tag)
 				elif len(synsets) == 1:
@@ -270,7 +319,7 @@ class Disambiguator(object):
 			print "{0}:\t{1}".format("causes", ', '.join([s.name() for s in synset.causes()]))		
 
 	def senses_summary(self, word, pos):
-		for s in wn.synsets(word, pos=pos): 
+		for s in self.get_synsets(word, tag=pos): 
 			examples = '\n\t\t'.join(e for e in s.examples())
 			print "name:\t\t{0}\ndef:\t\t{1}\nexamples:\t{2}\n".format(s.name(), s.definition(), examples)
 
@@ -312,7 +361,7 @@ class Disambiguator(object):
 		"""
 		synset_signatures = dict()
 		
-		for synset in wn.synsets(ambiguous_word, pos=pos):
+		for synset in self.get_synsets(ambiguous_word, tag=pos):
 			signature = []
 			#definition
 			signature += self.flatten(tokenizer.tokenize(synset.definition()))
@@ -364,7 +413,7 @@ class Disambiguator(object):
 		Modified Lesk algorithm.
 		based on the example by Liling Tan (https://github.com/alvations/pywsd)
 		"""
-		sense_dictionary = {s:set(self.flatten(tokenizer.tokenize(s.definition()))) for s in wn.synsets(ambiguous_word, pos=pos)}
+		sense_dictionary = {s:set(self.flatten(tokenizer.tokenize(s.definition()))) for s in self.get_synsets(ambiguous_word, tag=pos)}
 		ranked_senses = self.compare_overlaps(context, sense_dictionary)
 		
 		return ranked_senses  
@@ -399,7 +448,7 @@ class Disambiguator(object):
 		Select the first synset with the specified PoS
 		"""
 		try:
-			return wn.synsets(ambiguous_word, pos=pos)[0]
+			return self.get_synsets(ambiguous_word, tag=pos)[0]
 			return wn.synsets(ambiguous_word)[0]
 		except:
 			return Sentence.CLOSED_CLASS
@@ -487,7 +536,7 @@ class SemcorExperiment(object):
 			print
 			if len(g.senses) != len(e.senses):
 				raw_input("Mismatch!")
-			mismatches = tuple(idx for idx in xrange(len(g.senses)) if g.senses[idx] != e.senses[idx])
+			mismatches = tuple(idx for idx in xrange(len(g.senses)) if (g.senses[idx] != e.senses[idx]) and (g.senses != Disambiguator.UNSPECIFIED))
 			indices.append(mismatches)
 
 		return indices
@@ -592,7 +641,7 @@ class Sentence(object):
 			return senses
 
 		try:
-			return disambiguator.assign_senses(words=self.words, tags=self.pos_tags, polysemous_tag=self.UNKNOWN, closed_class_tag=self.CLOSED_CLASS)
+			return disambiguator.assign_senses(words=self.words, tags=self.pos_tags)
 		except:
 			return senses if senses else [self.UNKNOWN] * self.length
 
@@ -617,12 +666,45 @@ class Sentence(object):
 		"""
 		return [(self.words[i], self.pos_tags[i], self.senses[i]) for i in xrange(self.length)]
 
-if __name__ == '__main__':
+ 
+class Tests(unittest.TestCase):
+
+	def test_sense_assignment(self):
+		text = "Her reply stung me , but this was too important to let my hurt make any difference ."
+		tags = "PRP$ NN VB PRP , CC DT VB RB JJ TO VB PRP$ JJ VB DT NN .".split()
+		correct_senses = [Sentence.CLOSED_CLASS, Sentence.UNKNOWN, Sentence.UNKNOWN, Sentence.CLOSED_CLASS, 
+						  Sentence.CLOSED_CLASS, Sentence.CLOSED_CLASS, Sentence.CLOSED_CLASS, Sentence.UNKNOWN,
+ 						  Sentence.UNKNOWN, Sentence.UNKNOWN, Sentence.CLOSED_CLASS, Sentence.UNKNOWN, 
+ 						  Sentence.CLOSED_CLASS, Sentence.UNKNOWN, Sentence.UNKNOWN, Sentence.CLOSED_CLASS, 
+ 						  Sentence.UNKNOWN, Sentence.CLOSED_CLASS]
+		s = Sentence(text, pos_tags=tags)
+		self.assertEqual(s.senses, correct_senses)
+
+
+##############################################################
+
+def demo():
 	examples = ["I hammered 40 nails and now my hand hurts.", 
-	            "That stereo has great bass.", 
-	            "I caught a huge bass."]
+				"That stereo has great bass.", 
+				"I caught a huge bass."]
 	for example in examples:
 		s = Sentence(example)
 		disambiguator.polysemous_words(s)
 		disambiguator.disambiguate(s)
+
+def run_tests():
+	"""unit tests"""
+	print
+	print "*"*30
+	print "*", " "*10, "Tests", " "*9, "*"
+	print "*"*30
+	unittest.main()
+
+##############################################################
+
+if __name__ == '__main__':
+	#demo capabilities
+	demo()
+	#run unit tests
+	unittest.main()
 
