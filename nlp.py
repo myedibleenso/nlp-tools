@@ -607,8 +607,10 @@ class SemcorExperiment(object):
 		disambiguator.verbose = verbosity
 
 		total = self.total if self.ignore_unspecified else self.raw_total
-		right = self.total - mismatches
-		accuracy = right/self.total
+
+		right = total - mismatches
+		accuracy = right / total
+
 		#report accuracy and errors
 		return accuracy, Counter(mismatch_dict)
 
