@@ -5,7 +5,7 @@ from nltk.corpus import wordnet as wn
 from nltk.corpus import stopwords
 from itertools import chain
 from nltk.corpus import semcor
-from collections import defaultdict
+from collections import defaultdict, Counter
 import nltk
 import re
 
@@ -101,6 +101,7 @@ class Tokenizer(object):
 class Disambiguator(object):
 
 	def __init__(self):
+		self.verbose = True
 		self.stop = True
 		self.stem = True
 
@@ -116,13 +117,17 @@ class Disambiguator(object):
 				somelist[i:i+1] = somelist[i]
 		return somelist
 
+	def yap(self, msg):
+		if self.verbose:
+			print msg
+
 	def semcor_sentences(self, labeled=True):
 		sentences = []
 		for s in semcor.tagged_sents(tag="both"):
 			triplets = []
 			for w in s:
 				sense = self.clean_sense(w.label())
-				triplets += [(sense, w, self.clean_pos(w, p)) for (w,p) in w.pos()]
+				triplets += [(self.sense_pos(sense=sense, tag=p), w, self.clean_pos(w, p)) for (w,p) in w.pos()]
 
 			senses, words, tags = zip(*triplets)			
 
@@ -138,6 +143,12 @@ class Disambiguator(object):
 	def clean_sense(self, sense):
 		return Sentence.CLOSED_CLASS if (not sense or sense == sense.upper()) else sense
 	
+	def sense_pos(self, sense, tag):
+		"""
+		include PoS in wordnet sense
+		"""
+		return sense if sense == Sentence.CLOSED_CLASS else ".{0}.".format(self.get_wordnet_pos(tag)).join(sense.split("."))
+
 	def clean_pos(self, word, tag):
 		return tag or word
 
@@ -389,7 +400,7 @@ class Disambiguator(object):
 			return wn.synsets(ambiguous_word, pos=pos)[0]
 			return wn.synsets(ambiguous_word)[0]
 		except:
-			return "UNKNOWN"
+			return Sentence.CLOSED_CLASS
 
 	def disambiguate(self, sentence, method=None):
 		"""
@@ -405,7 +416,7 @@ class Disambiguator(object):
 		method = self.method if not method else method
 		
 		#display sentence to disambiguate
-		print "\nDisambiguating \"{0}\" with {1}...".format(sentence.semantic_representation(), method.__name__)
+		self.yap("\nDisambiguating \"{0}\" with {1}...".format(sentence.semantic_representation(), method.__name__))
 		
 		context_sentence = [stemmer.stem(w) for w in sentence.words] if self.stem else sentence.words
 		
@@ -418,16 +429,18 @@ class Disambiguator(object):
 			except:
 				best_sense = method(context=context_sentence, ambiguous_word=word, pos=tag)
 			
-			print "\nWord:\t\t{0}".format(word)
-			print "Sense:\t\t{0}".format(best_sense.name())
-			print "Definition:\t{0}".format(best_sense.definition())
-			
-			disambiguated_senses[i] = best_sense.name()
+			self.yap("\nWord:\t\t{0}".format(word))
+			try:
+				self.yap("Sense:\t\t{0}".format(best_sense.name()))
+				self.yap("Definition:\t{0}".format(best_sense.definition()))		
+				disambiguated_senses[i] = best_sense.name()
+			except:
+				disambiguated_senses = best_sense
 		
 		disambiguated_sentence = Sentence(words=sentence.words[:], pos_tags=sentence.pos_tags[:], senses=disambiguated_senses)
 		
-		print "\n",disambiguated_sentence
-		print disambiguated_sentence.semantic_representation()
+		self.yap("\n{0}".format(disambiguated_sentence))
+		self.yap(disambiguated_sentence.semantic_representation())
 		#return the new Sentence
 		return disambiguated_sentence
 
@@ -444,7 +457,7 @@ class Performance(object):
 		total = len(self.gold_labels)
 		right = sum(1 for i in xrange(total) if self.gold_labels[i] == self.experimental_labels[i])
 		wrong = total - right
-		return right/total if right else 1
+		return right/total
 
 ################################################
 class SemcorExperiment(object):
@@ -496,19 +509,25 @@ class SemcorExperiment(object):
 		
 		return mismatches, error_list
 
-	def semcor_baseline(self):
+	def wsd_performance(self, method=None):
 		"""
-		Check accuracy of baseline WSD method (i.e. select most common sense)
+		Checks accuracy of baseline WSD method by default
 		"""
+		method = method or disambiguator.most_freq_sense
+
 		mismatches = 0 
 		mismatch_dict = defaultdict(int)
-		
+
+		verbosity = disambiguator.verbose
+		#temporarily silence disambiguator
+		disambiguator.verbose = False
 		for i in xrange(len(self.test_indices)):
 			g = self.gold[i]
 			e = self.experimental[i]
 			indices = self.test_indices
-			new_e = disambiguator.disambiguate(sentence=e, method=disambiguator.most_freq_sense)
-			error_count, errors = self.compare_labels(gold=g, experimental=e, indices=indices[i])
+			new_e = disambiguator.disambiguate(sentence=e, method=method)
+			#compare sense labels of disambiguated sentence and gold sentence
+			error_count, errors = self.compare_labels(gold=g, experimental=new_e, indices=indices[i])
 			#increment error count
 			mismatches += error_count
 			#store any errors
@@ -516,9 +535,13 @@ class SemcorExperiment(object):
 				for e in errors:
 					mismatch_dict[e]+=1
 
-		accuracy = mismatches/self.total if mismatches else 1
+		#restore disambiguator verbosity
+		disambiguator.verbose = verbosity
+
+		right = self.total - mismatches
+		accuracy = right/self.total
 		#report accuracy and errors
-		return accuracy, mismatch_dict
+		return accuracy, Counter(mismatch_dict)
 
 
 ######################################
