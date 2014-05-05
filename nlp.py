@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 from __future__ import unicode_literals, division
-from nltk.stem import PorterStemmer
+from nltk.stem import PorterStemmer, WordNetLemmatizer
 from nltk.corpus import wordnet as wn
 from nltk.corpus import stopwords
 from itertools import chain
@@ -153,6 +153,8 @@ class Disambiguator(object):
 		return tag or word
 
 	def clean_labels(self, senses):
+#		if not s:
+#			print word
 		return [s if s != None else Sentence.CLOSED_CLASS for s in senses]
 		return senses
 
@@ -551,6 +553,7 @@ tagger = lambda words: [t for (w,t) in nltk.pos_tag(words)]
 tokenizer = Tokenizer()
 disambiguator = Disambiguator()
 stemmer = PorterStemmer()
+lemmatizer = WordNetLemmatizer()
 ######################################
 ######################################
 
