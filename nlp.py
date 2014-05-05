@@ -158,6 +158,9 @@ class Disambiguator(object):
 	
 	def check_sense(self, sense, word, tag):
 		
+		if not sense:
+			return Sentence.CLOSED_CLASS
+
 		# see if the sense exists in wordnet DB
 		try:
 			if wn.synset(sense):
@@ -177,22 +180,32 @@ class Disambiguator(object):
 		elif has_sense:
 			return sense
 
-		# case 3: Is the word an adjective?  
-		#         If so, something might be wrong 
+		# case 3: Something might be wrong 
 		#         with the synset formatting...
-		elif self.get_wordnet_pos(tag) == wn.ADJ:
-			adj_sense = ".a.".join(sense.split("."))
-			adj_SAT_sense = ".s.".join(split("."))
-			matching_adj_senses = [s.name() for s in synsets if s.name() in [adj_sense, adj_SAT_sense]]
-			
-			# inspect the adj senses that match the PoS-corrected sense representation
-			if matching_adj_senses:
+		else:
+			return self.check_sense_pos(sense, word, tag)
 
-				if len(matching_adj_senses) == 1:
-					return matching_adj_senses[0]
-				# if there is more than one match, we cannot determine the actual label
-				else:
-					return self.UNSPECIFIED
+	def check_sense_pos(self, sense, word, tag):
+		"""
+		"""
+		synsets = self.get_synsets(word)
+
+		wn_tag = self.get_wordnet_pos(tag)
+		senses = [".{0}.".format(wn_tag).join(sense.split("."))]
+
+		if wn_tag == wn.ADJ:
+			adj_SAT_sense = ".s.".join(sense.split("."))
+			senses.append(adj_SAT_sense)
+
+		#see if the new representation matches any synsets...
+		matching_senses = [s.name() for s in synsets if s.name() in senses]
+
+		if matching_senses:
+			if len(matching_senses) == 1:
+				return matching_senses[0]
+		
+		# if there are multiple matching senses...
+		return self.UNSPECIFIED
 
 	def clean_pos(self, word, tag):
 		"""
@@ -514,50 +527,55 @@ class Performance(object):
 class SemcorExperiment(object):
 	
 	def __init__(self):
+		self.ignore_unspecified = True
 		print "Generating sense-annotated semcor sentences..."
 		self.gold = disambiguator.semcor_sentences()
 		print "Generating experimental semcor sentences..."
 		self.experimental = disambiguator.semcor_sentences(labeled=False)
-		print "Indexing potential ambiguities..."
-		self.test_indices = self.get_mismatch_indices()
-		self.total = sum(len(indices) for indices in self.test_indices)
+		print "Counting mismatches..."
+		self.raw_total = None
+		self.total = None 
+		self.count_mismatches()
 	
-	def get_mismatch_indices(self):
+	def count_mismatches(self):
 		"""
-		get indices of sense mismatches
 		"""
-		indices = list()
+		raw_total_mismatches = 0
+		selective_mismatches = 0
 		for i in xrange(len(self.gold)):
 			g = self.gold[i]
 			e = self.experimental[i]
-			print "index: {0}".format(i)
-			print "gold:\n\twords: {0}\n\ttags: {1}\n\tsenses: {2}\n\tnum senses: {3}".format(g, ' '.join(g.pos_tags), ' '.join(g.senses), len(g.senses))
-			print "experimental:\n\twords: {0}\n\ttags: {1}\n\tsenses: {2}\n\tnum senses: {3}".format(e, ' '.join(e.pos_tags), ' '.join(e.senses), len(e.senses))
-			print
-			if len(g.senses) != len(e.senses):
-				raw_input("Mismatch!")
-			mismatches = tuple(idx for idx in xrange(len(g.senses)) if (g.senses[idx] != e.senses[idx]) and (g.senses != Disambiguator.UNSPECIFIED))
-			indices.append(mismatches)
+			for idx in xrange(len(g.senses)):
+				if g.senses[idx] != e.senses[idx]:
+					raw_total_mismatches += 1
+					if g.senses[idx] != Disambiguator.UNSPECIFIED:
+						selective_mismatches += 1
 
-		return indices
+		self.raw_total = raw_total_mismatches
+		self.total = selective_mismatches
 
-	def compare_labels(self, gold, experimental, indices=None):
+	def compare_labels(self, gold, experimental):
 		"""
 		compare the labels of two sentences
 		"""
-
 		mismatches = 0 
 		#list of triplets (word, gold sense, experimental sense)
 		error_list = list()
 		
-		#check if we have indices
-		indices = indices or xrange(len(gold.senses))
-
-		for i in indices:
-			if gold.senses[i] != experimental.senses[i]:
-				mismatches += 1
-				error_list.append((gold.words[i], gold.senses[i], experimental.senses[i]))
+		# find selective mismatches...
+		if self.ignore_unspecified:
+			for i in xrange(len(gold.senses)):
+				if (gold.senses[i] != experimental.senses[i]) and (gold.senses[i] != Disambiguator.UNSPECIFIED):
+					mismatches += 1
+					error_list.append((gold.words[i], gold.senses[i], experimental.senses[i]))
 		
+		# find all mismatches...
+		else:
+			for i in xrange(len(gold.senses)):
+				if gold.senses[i] != experimental.senses[i]:
+					mismatches += 1
+					error_list.append((gold.words[i], gold.senses[i], experimental.senses[i]))
+			
 		return mismatches, error_list
 
 	def wsd_performance(self, method=None):
@@ -572,28 +590,34 @@ class SemcorExperiment(object):
 		verbosity = disambiguator.verbose
 		#temporarily silence disambiguator
 		disambiguator.verbose = False
-		for i in xrange(len(self.test_indices)):
+		for i in xrange(len(self.gold)):
 			g = self.gold[i]
 			e = self.experimental[i]
-			indices = self.test_indices
 			new_e = disambiguator.disambiguate(sentence=e, method=method)
 			#compare sense labels of disambiguated sentence and gold sentence
-			error_count, errors = self.compare_labels(gold=g, experimental=new_e, indices=indices[i])
+			error_count, errors = self.compare_labels(gold=g, experimental=new_e)
 			#increment error count
 			mismatches += error_count
 			#store any errors
 			if errors:
 				for e in errors:
-					mismatch_dict[e]+=1
+					mismatch_dict[e] += 1
 
 		#restore disambiguator verbosity
 		disambiguator.verbose = verbosity
 
+		total = self.total if self.ignore_unspecified else self.raw_total
 		right = self.total - mismatches
 		accuracy = right/self.total
 		#report accuracy and errors
 		return accuracy, Counter(mismatch_dict)
 
+	def writeResults(self, fname, error_dict, threshold=1):
+		"""
+		"""
+		with open(fname, 'w') as out:
+			for (e, c) in [(error, count) for (error, count) in sorted(error_dict.items(), key=lambda x: x[-1], reverse=True) if count >= threshold]:
+   				out.write("{0}\t{1}\n".format('\t'.join(e),c))
 
 ######################################
 ######################################
