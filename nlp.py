@@ -123,6 +123,39 @@ class Disambiguator(object):
 		if self.verbose:
 			print msg
 
+	def is_single(self, w, t, sense):
+		wn_t = disambiguator.get_wordnet_pos(t)
+		return True if (len(wn.synsets(w,pos=wn_t)) == 1 and (sense != Disambiguator.UNSPECIFIED) and (sense != Sentence.CLOSED_CLASS)) else False
+
+	def is_labeled_poly(self, w, t, sense):
+		wn_t = disambiguator.get_wordnet_pos(t)
+		return True if (len(wn.synsets(w,pos=wn_t)) > 1 and (sense != Disambiguator.UNSPECIFIED) and (sense != Sentence.CLOSED_CLASS)) else False
+
+	def semantic_corpora_statistics(self, gold, experimental):
+		"""
+		"""
+		all_tags = sum(s.length for s in gold)
+		
+		experimental_polysemous = sum(s.senses.count(Sentence.UNKNOWN) for s in experimental) / all_tags
+		experimental_single_senses = sum(len([sense for sense in s.senses if (sense != Sentence.UNKNOWN) and (sense != Sentence.CLOSED_CLASS)]) for s in experimental) / all_tags
+		experimental_closed_tags = sum(s.senses.count(Sentence.CLOSED_CLASS) for s in experimental) / all_tags
+		
+		gold_polysemous = sum(sum([1 for i in xrange(s.length) if is_labeled_poly(s.words[i], s.pos_tags[i], s.senses[i])]) for s in gold) / all_tags
+		gold_single_senses = sum(sum(1 for i in xrange(s.length) if is_single(s.words[i], s.pos_tags[i], s.senses[i])) for s in gold) / all_tags
+		gold_closed = sum(s.senses.count(Sentence.CLOSED_CLASS) for s in gold) / all_tags
+		gold_unspecified = sum(s.senses.count(Disambiguator.UNSPECIFIED) for s in gold) / all_tags
+
+		print "Total senses:\t{0}".format(all_tags)
+
+		print "Experimental % polysemous:\t{0:.4}".format(experimental_polysemous)
+		print "Experimental % single sense:\t{0:.4}".format(experimental_single_senses)
+		print "Experimental % closed class:\t{0:.4}".format(experimental_closed_tags)
+
+		print "Gold % polysemous:\t{0:.4}".format(gold_polysemous)
+		print "Gold % single sense:\t{0:.4}".format(gold_single_senses)
+		print "Gold % closed class:\t{0:.4}".format(gold_unspecified)
+		print "Gold % closed class:\t{0:.4}".format(gold_unspecified)
+
 	def semcor_sentences(self, labeled=True):
 		sentences = []
 		for s in semcor.tagged_sents(tag="both"):
@@ -142,6 +175,11 @@ class Disambiguator(object):
 			sentences.append(sentence)
 		return sentences
 
+	def write_sentences(self, fname, sentences):
+		with open(fname, 'w') as out:
+			for s in sentences:
+				out.write( "{0}\n".format(" ".join("__".join(t) for t in s.tuples())))
+
 	def get_synsets(self, word, tag=None):
 		"""
 		retrieve synsets for the specified PoS
@@ -158,7 +196,8 @@ class Disambiguator(object):
 	
 	def check_sense(self, sense, word, tag):
 		
-		if not sense:
+		# if there isn't a sense or the sense if the PoS...
+		if not sense or sense == tag:
 			return Sentence.CLOSED_CLASS
 
 		# see if the sense exists in wordnet DB
@@ -180,7 +219,11 @@ class Disambiguator(object):
 		elif has_sense:
 			return sense
 
-		# case 3: Something might be wrong 
+		# case 3: Only one synset?
+		if len(synsets) == 1:
+			return synsets[0].name()
+
+		# case 4: Something might be wrong 
 		#         with the synset formatting...
 		else:
 			return self.check_sense_pos(sense, word, tag)
@@ -188,22 +231,38 @@ class Disambiguator(object):
 	def check_sense_pos(self, sense, word, tag):
 		"""
 		"""
+
+		# retrieve all synsets and synset names for the word
 		synsets = self.get_synsets(word)
+		synset_names = [s.name() for s in synsets]
 
+		# get the wordnet PoS for the given treebank tag
 		wn_tag = self.get_wordnet_pos(tag)
-		senses = [".{0}.".format(wn_tag).join(sense.split("."))]
+		
+		formatted_sense = ".{0}.".format(wn_tag).join(sense.split("."))
 
+		# did the formatting change work?
+		if formatted_sense in synset_names:
+			return formatted_sense
+
+		# if the word is an adjective, it might have an ADJ_SAT match
 		if wn_tag == wn.ADJ:
 			adj_SAT_sense = ".s.".join(sense.split("."))
-			senses.append(adj_SAT_sense)
-
-		#see if the new representation matches any synsets...
-		matching_senses = [s.name() for s in synsets if s.name() in senses]
-
-		if matching_senses:
-			if len(matching_senses) == 1:
-				return matching_senses[0]
+			if adj_SAT_sense in synset_names:
+				return adj_SAT_sense
 		
+		# Check the wn PoS:
+		wn_tag = self.get_wordnet_pos(tag)
+		candidates = [s.name() for s in synsets if s.pos() == wn_tag]
+		
+		# if only one match...
+		if len(candidates) == 1:
+			return candidates[0]
+	
+		# if multiple matches...
+		elif len(candidates) > 1:
+			return Disambiguator.UNSPECIFIED
+
 		# if there are multiple matching senses...
 		return self.UNSPECIFIED
 
@@ -266,7 +325,7 @@ class Disambiguator(object):
 		"""
 		return list of polysemous words
 		"""
-		return [(sentence.words[i], self.get_wordnet_pos(sentence.pos_tags[i])) for i in xrange(len(sentence.senses)) if sentence.senses[i] == sentence.UNKNOWN]
+		return [(sentence.words[i], self.get_wordnet_pos(sentence.pos_tags[i])) for i in xrange(len(sentence.senses)) if sentence.senses[i] == Sentence.UNKNOWN]
 
 	def get_frames(self, sense):
 		"""
@@ -567,14 +626,16 @@ class SemcorExperiment(object):
 			for i in xrange(len(gold.senses)):
 				if (gold.senses[i] != experimental.senses[i]) and (gold.senses[i] != Disambiguator.UNSPECIFIED):
 					mismatches += 1
-					error_list.append((gold.words[i], gold.senses[i], experimental.senses[i]))
+					wn_tag = disambiguator.get_wordnet_pos(gold.pos_tags[i]) or Sentence.CLOSED_CLASS
+					error_list.append((gold.words[i], wn_tag, gold.senses[i], experimental.senses[i]))
 		
 		# find all mismatches...
 		else:
 			for i in xrange(len(gold.senses)):
 				if gold.senses[i] != experimental.senses[i]:
 					mismatches += 1
-					error_list.append((gold.words[i], gold.senses[i], experimental.senses[i]))
+					wn_tag = disambiguator.get_wordnet_pos(gold.pos_tags[i]) or Sentence.CLOSED_CLASS
+					error_list.append((gold.words[i], wn_tag, gold.senses[i], experimental.senses[i]))
 			
 		return mismatches, error_list
 
@@ -589,10 +650,11 @@ class SemcorExperiment(object):
 
 		verbosity = disambiguator.verbose
 		#temporarily silence disambiguator
-		disambiguator.verbose = False
+		#disambiguator.verbose = False
 		for i in xrange(len(self.gold)):
 			g = self.gold[i]
 			e = self.experimental[i]
+			#context, ambiguous_word, pos=None
 			new_e = disambiguator.disambiguate(sentence=e, method=method)
 			#compare sense labels of disambiguated sentence and gold sentence
 			error_count, errors = self.compare_labels(gold=g, experimental=new_e)
@@ -604,7 +666,7 @@ class SemcorExperiment(object):
 					mismatch_dict[e] += 1
 
 		#restore disambiguator verbosity
-		disambiguator.verbose = verbosity
+		#disambiguator.verbose = verbosity
 
 		total = self.total if self.ignore_unspecified else self.raw_total
 
@@ -614,7 +676,7 @@ class SemcorExperiment(object):
 		#report accuracy and errors
 		return accuracy, Counter(mismatch_dict)
 
-	def writeResults(self, fname, error_dict, threshold=1):
+	def write_results(self, fname, error_dict, threshold=1):
 		"""
 		"""
 		with open(fname, 'w') as out:
