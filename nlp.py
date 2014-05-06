@@ -140,8 +140,8 @@ class Disambiguator(object):
 		experimental_single_senses = sum(len([sense for sense in s.senses if (sense != Sentence.UNKNOWN) and (sense != Sentence.CLOSED_CLASS)]) for s in experimental) / all_tags
 		experimental_closed_tags = sum(s.senses.count(Sentence.CLOSED_CLASS) for s in experimental) / all_tags
 		
-		gold_polysemous = sum(sum([1 for i in xrange(s.length) if is_labeled_poly(s.words[i], s.pos_tags[i], s.senses[i])]) for s in gold) / all_tags
-		gold_single_senses = sum(sum(1 for i in xrange(s.length) if is_single(s.words[i], s.pos_tags[i], s.senses[i])) for s in gold) / all_tags
+		gold_polysemous = sum(sum([1 for i in xrange(s.length) if iself.s_labeled_poly(s.words[i], s.pos_tags[i], s.senses[i])]) for s in gold) / all_tags
+		gold_single_senses = sum(sum(1 for i in xrange(s.length) if self.is_single(s.words[i], s.pos_tags[i], s.senses[i])) for s in gold) / all_tags
 		gold_closed = sum(s.senses.count(Sentence.CLOSED_CLASS) for s in gold) / all_tags
 		gold_unspecified = sum(s.senses.count(Disambiguator.UNSPECIFIED) for s in gold) / all_tags
 
