@@ -136,25 +136,27 @@ class Disambiguator(object):
 		"""
 		all_tags = sum(s.length for s in gold)
 		
-		experimental_polysemous = sum(s.senses.count(Sentence.UNKNOWN) for s in experimental) / all_tags
-		experimental_single_senses = sum(len([sense for sense in s.senses if (sense != Sentence.UNKNOWN) and (sense != Sentence.CLOSED_CLASS)]) for s in experimental) / all_tags
-		experimental_closed_tags = sum(s.senses.count(Sentence.CLOSED_CLASS) for s in experimental) / all_tags
+		experimental_polysemous = sum(s.senses.count(Sentence.UNKNOWN) for s in experimental)
+		experimental_single_senses = sum(len([sense for sense in s.senses if (sense != Sentence.UNKNOWN) and (sense != Sentence.CLOSED_CLASS)]) for s in experimental)
+		experimental_closed_tags = sum(s.senses.count(Sentence.CLOSED_CLASS) for s in experimental)
 		
-		gold_polysemous = sum(sum([1 for i in xrange(s.length) if iself.s_labeled_poly(s.words[i], s.pos_tags[i], s.senses[i])]) for s in gold) / all_tags
-		gold_single_senses = sum(sum(1 for i in xrange(s.length) if self.is_single(s.words[i], s.pos_tags[i], s.senses[i])) for s in gold) / all_tags
-		gold_closed = sum(s.senses.count(Sentence.CLOSED_CLASS) for s in gold) / all_tags
-		gold_unspecified = sum(s.senses.count(Disambiguator.UNSPECIFIED) for s in gold) / all_tags
+		gold_polysemous = sum(sum([1 for i in xrange(s.length) if self.is_labeled_poly(s.words[i], s.pos_tags[i], s.senses[i])]) for s in gold)
+		gold_single_senses = sum(sum(1 for i in xrange(s.length) if self.is_single(s.words[i], s.pos_tags[i], s.senses[i])) for s in gold)
+		gold_closed = sum(s.senses.count(Sentence.CLOSED_CLASS) for s in gold)
+		gold_unspecified = sum(s.senses.count(Disambiguator.UNSPECIFIED) for s in gold)
 
-		print "Total senses:\t{0}".format(all_tags)
+		print "\nTotal senses:\t{0}".format(all_tags)
+		print "To compare:\t{0}".format(all_tags - gold_unspecified)
+		print "Gold polysemous:\t{0}\n".format(gold_polysemous)
 
-		print "Experimental % polysemous:\t{0:.4}".format(experimental_polysemous)
-		print "Experimental % single sense:\t{0:.4}".format(experimental_single_senses)
-		print "Experimental % closed class:\t{0:.4}".format(experimental_closed_tags)
+		print "Experimental polysemous (%):\t{0:.4}".format(experimental_polysemous / all_tags)
+		print "Experimental single sense (%):\t{0:.4}".format(experimental_single_senses / all_tags)
+		print "Experimental closed class (%):\t{0:.4}\n".format(experimental_closed_tags / all_tags)
 
-		print "Gold % polysemous:\t{0:.4}".format(gold_polysemous)
-		print "Gold % single sense:\t{0:.4}".format(gold_single_senses)
-		print "Gold % closed class:\t{0:.4}".format(gold_unspecified)
-		print "Gold % closed class:\t{0:.4}".format(gold_unspecified)
+		print "Gold polysemous (%):\t{0:.4}".format(gold_polysemous / all_tags)
+		print "Gold single sense (%):\t{0:.4}".format(gold_single_senses / all_tags)
+		print "Gold closed class (%):\t{0:.4}".format(gold_closed / all_tags)
+		print "Gold unspecified (%):\t{0:.4}\n".format(gold_unspecified / all_tags)
 
 	def semcor_sentences(self, labeled=True):
 		sentences = []
