@@ -158,13 +158,24 @@ class Disambiguator(object):
 		print "Gold closed class (%):\t{0:.4}".format(gold_closed / all_tags)
 		print "Gold unspecified (%):\t{0:.4}\n".format(gold_unspecified / all_tags)
 
-	def semcor_sentences(self, labeled=True):
+	def compare_sentences(self, gold_original, gold_corrected, experimental):
+		for i in range(gold_original.length):
+			print "word:\t\t\t{0}".format(gold_original.words[i])
+			print "pos:\t\t\t{0}".format(gold_original.pos_tags[i])
+			print "original sense:\t\t{0}".format(gold_original.senses[i])
+			print "corrected sense:\t{0}".format(gold_corrected.senses[i])
+			print "experimental sense:\t{0}\n".format(experimental.senses[i])
+
+	def semcor_sentences(self, labeled=True, original_sense=False):
 		sentences = []
 		for s in semcor.tagged_sents(tag="both"):
 			triplets = []
 			for w in s:
 				sense = w.label()
-				triplets += [(self.check_sense(sense=sense, word=w, tag=self.clean_pos(w, p)), w, self.clean_pos(w, p)) for (w,p) in w.pos()]
+				if original_sense:
+					triplets += [(sense, w, self.clean_pos(w, p)) for (w,p) in w.pos()]
+				else:
+					triplets += [(self.check_sense(sense=sense, word=w, tag=self.clean_pos(w, p)), w, self.clean_pos(w, p)) for (w,p) in w.pos()]
 
 			senses, words, tags = zip(*triplets)			
 
@@ -198,8 +209,8 @@ class Disambiguator(object):
 	
 	def check_sense(self, sense, word, tag):
 		
-		# if there isn't a sense or the sense if the PoS...
-		if not sense or sense == tag:
+		# if there isn't a sense...
+		if (not sense or sense == tag) and (not self.get_wordnet_pos(tag)):
 			return Sentence.CLOSED_CLASS
 
 		# see if the sense exists in wordnet DB
@@ -212,14 +223,14 @@ class Disambiguator(object):
 		# retrieve all possible synsets for a word...
 		synsets = self.get_synsets(word)
 
-		# case 1: If the specified synset doesn't exist 
-		#         and the word has no synsets...
-		if not synsets and not has_sense:
-			return Sentence.CLOSED_CLASS
-
-		# case 2: If the specified synset exists...
-		elif has_sense:
+		# case 1: If the specified synset exists...
+		if has_sense:
 			return sense
+
+		# case 2: If the specified synset doesn't exist 
+		#         and the word has no synsets...
+		elif not synsets and not has_sense:
+			return Sentence.CLOSED_CLASS
 
 		# case 3: Only one synset?
 		if len(synsets) == 1:
