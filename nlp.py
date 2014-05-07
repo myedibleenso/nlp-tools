@@ -2,22 +2,20 @@
 from __future__ import unicode_literals, division
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from nltk.corpus import wordnet as wn
-from nltk.corpus import stopwords
-from itertools import chain
-from nltk.corpus import semcor
+from nltk.corpus import stopwords, semcor
 from collections import defaultdict, Counter
 import unittest
 import nltk
 import re
 
-###regex
+###############regex###################
+
 url_pattern = r'(https?:\/\/.*[\r\n]*)'
 punct_pattern = re.compile("(([)!?.'(*-8;:=<?>@DP[\]\\dop{}|]+\s?)+)")
 punct = "!')(*-.8;:=<?>@DP[]\dop{}|"
 
-###
-token_pattern = r'''(?x)              # set flag to allow verbose regexps
-				 https?\://([^ ,;:()`'"])+   # URLs
+token_pattern = r'''(?x)                    # set flag to allow verbose regexps
+				 https?\://([^ ,;:()`'"])+  # URLs
 				| [<>]?[:;=8][\-o\*\']?[\)\]\(\[dDpP/\:\}\{@\|\\]   # emoticons
 				| [\)\]\(\[dDpP/\:\}\{@\|\\][\-o\*\']?[:;=8][<>]?   # emoticons, reverse orientation
 				| ([A-Z]\.)+                # abbreviations, e.g. "U.S.A."
@@ -98,7 +96,21 @@ class Tokenizer(object):
 		return self.correct_tokenization(tokenized_text)
 		#return tokenized_text if len(tokenized_text) > 1 else tokenized_text[0]
 
-#######################################################
+######################################
+class Performance(object):
+
+	def __init__(self, gold_labels, experimental_labels):
+		self.gold_labels = old_labels
+		self.experimental_labels = experimental_labels
+		self.accuracy = self.accuracy()
+
+	def accuracy(self):
+		total = len(self.gold_labels)
+		right = sum(1 for i in xrange(total) if self.gold_labels[i] == self.experimental_labels[i])
+		wrong = total - right
+		return right/total
+
+################################################
 class Disambiguator(object):
 	UNSPECIFIED = "<unspecified>"
 
@@ -595,20 +607,6 @@ class Disambiguator(object):
 			self.disambiguate(sentence, method=c)
 			print "\n{0}".format("-"*100)
 
-######################################
-class Performance(object):
-
-	def __init__(self, gold_labels, experimental_labels):
-		self.gold_labels = old_labels
-		self.experimental_labels = experimental_labels
-		self.accuracy = self.accuracy()
-
-	def accuracy(self):
-		total = len(self.gold_labels)
-		right = sum(1 for i in xrange(total) if self.gold_labels[i] == self.experimental_labels[i])
-		wrong = total - right
-		return right/total
-
 ################################################
 class SemcorExperiment(object):
 	
@@ -709,11 +707,10 @@ class SemcorExperiment(object):
 		"""
 		with open(fname, 'w') as out:
 			for (e, c) in [(error, count) for (error, count) in sorted(error_dict.items(), key=lambda x: x[-1], reverse=True) if count >= threshold]:
-   				out.write("{0}\t{1}\n".format('\t'.join(e),c))
+				out.write("{0}\t{1}\n".format('\t'.join(e),c))
 
 ######################################
 ######################################
-#tagger = nltk.pos_tag
 tagger = lambda words: [t for (w,t) in nltk.pos_tag(words)]
 tokenizer = Tokenizer()
 disambiguator = Disambiguator()
@@ -758,10 +755,10 @@ class Sentence(object):
 		if type(senses) is list and self.length == len(senses):
 			return senses
 
-		try:
-			return disambiguator.assign_senses(words=self.words, tags=self.pos_tags)
-		except:
-			return senses if senses else [self.UNKNOWN] * self.length
+		
+		return disambiguator.assign_senses(words=self.words, tags=self.pos_tags)
+		#except:
+		#	return senses if senses else [self.UNKNOWN] * self.length
 
 	def semantic_representation(self):
 		representation = self.senses[:]
@@ -792,9 +789,9 @@ class Tests(unittest.TestCase):
 		tags = "PRP$ NN VB PRP , CC DT VB RB JJ TO VB PRP$ JJ VB DT NN .".split()
 		correct_senses = [Sentence.CLOSED_CLASS, Sentence.UNKNOWN, Sentence.UNKNOWN, Sentence.CLOSED_CLASS, 
 						  Sentence.CLOSED_CLASS, Sentence.CLOSED_CLASS, Sentence.CLOSED_CLASS, Sentence.UNKNOWN,
- 						  Sentence.UNKNOWN, Sentence.UNKNOWN, Sentence.CLOSED_CLASS, Sentence.UNKNOWN, 
- 						  Sentence.CLOSED_CLASS, Sentence.UNKNOWN, Sentence.UNKNOWN, Sentence.CLOSED_CLASS, 
- 						  Sentence.UNKNOWN, Sentence.CLOSED_CLASS]
+						  Sentence.UNKNOWN, Sentence.UNKNOWN, Sentence.CLOSED_CLASS, Sentence.UNKNOWN, 
+						  Sentence.CLOSED_CLASS, Sentence.UNKNOWN, Sentence.UNKNOWN, Sentence.CLOSED_CLASS, 
+						  Sentence.UNKNOWN, Sentence.CLOSED_CLASS]
 		s = Sentence(text, pos_tags=tags)
 		self.assertEqual(s.senses, correct_senses)
 
