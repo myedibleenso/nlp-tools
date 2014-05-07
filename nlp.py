@@ -154,15 +154,15 @@ class Disambiguator(object):
 		print "Actual comparisons (not single, closed , NE, or unspecified):\t{0}".format(all_tags - (gold_closed + gold_single_senses + gold_ne + gold_unspecified))
 		print "Gold polysemous:\t{0}\n".format(gold_polysemous)
 
-		print "Experimental polysemous:\t{0:.2}%".format(float(experimental_polysemous / all_tags) * 100)
-		print "Experimental single sense:\t{0:.2}%".format(float(experimental_single_senses / all_tags) * 100)
-		print "Experimental closed class:\t{0:.2}%\n".format(float(experimental_closed_tags / all_tags) * 100)
+		print "Experimental polysemous:\t{0:.2f}%".format(float(experimental_polysemous / all_tags) * 100)
+		print "Experimental single sense:\t{0:.2f}%".format(float(experimental_single_senses / all_tags) * 100)
+		print "Experimental closed class:\t{0:.2f}%\n".format(float(experimental_closed_tags / all_tags) * 100)
 
-		print "Gold polysemous:\t{0:.2}%".format(float(gold_polysemous / all_tags) * 100)
-		print "Gold single sense:\t{0:.2}%".format(float(gold_single_senses / all_tags) * 100)
-		print "Gold closed class:\t{0:.2}%".format(float(gold_closed / all_tags) * 100)
-		print "Gold NE:\t{0:.2}%\n".format(float(gold_unspecified / all_tags) * 100)
-		print "Gold unspecified:\t{0:.2}%\n".format(float(gold_unspecified / all_tags) * 100)
+		print "Gold polysemous:\t{0:.2f}%".format(float(gold_polysemous / all_tags) * 100)
+		print "Gold single sense:\t{0:.2f}%".format(float(gold_single_senses / all_tags) * 100)
+		print "Gold closed class:\t{0:.2f}%".format(float(gold_closed / all_tags) * 100)
+		print "Gold NE:\t{0:.2f}%\n".format(float(gold_unspecified / all_tags) * 100)
+		print "Gold unspecified:\t{0:.2f}%\n".format(float(gold_unspecified / all_tags) * 100)
 
 	def compare_sentences(self, gold_original, gold_corrected, experimental):
 		for i in range(gold_original.length):
