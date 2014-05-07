@@ -108,6 +108,9 @@ class Disambiguator(object):
 		self.stem = True
 
 		self.method = self.modified_lesk
+		self.classifiers = [self.most_freq_sense, 
+							self.simple_lesk, 
+							self.modified_lesk]
 	
 	def flatten(self, somelist):
 		"""
@@ -143,20 +146,23 @@ class Disambiguator(object):
 		gold_polysemous = sum(sum([1 for i in xrange(s.length) if self.is_labeled_poly(s.words[i], s.pos_tags[i], s.senses[i])]) for s in gold)
 		gold_single_senses = sum(sum(1 for i in xrange(s.length) if self.is_single(s.words[i], s.pos_tags[i], s.senses[i])) for s in gold)
 		gold_closed = sum(s.senses.count(Sentence.CLOSED_CLASS) for s in gold)
+		gold_ne = sum(s.senses.count(Sentence.NE) for s in gold)
 		gold_unspecified = sum(s.senses.count(Disambiguator.UNSPECIFIED) for s in gold)
 
 		print "\nTotal senses:\t{0}".format(all_tags)
 		print "To compare:\t{0}".format(all_tags - gold_unspecified)
+		print "Actual comparisons (not single, closed , NE, or unspecified):\t{0}".format(all_tags - (gold_closed + gold_single_senses + gold_ne + gold_unspecified))
 		print "Gold polysemous:\t{0}\n".format(gold_polysemous)
 
-		print "Experimental polysemous (%):\t{0:.4}".format(experimental_polysemous / all_tags)
-		print "Experimental single sense (%):\t{0:.4}".format(experimental_single_senses / all_tags)
-		print "Experimental closed class (%):\t{0:.4}\n".format(experimental_closed_tags / all_tags)
+		print "Experimental polysemous:\t{0:.2}%".format(float(experimental_polysemous / all_tags) * 100)
+		print "Experimental single sense:\t{0:.2}%".format(float(experimental_single_senses / all_tags) * 100)
+		print "Experimental closed class:\t{0:.2}%\n".format(float(experimental_closed_tags / all_tags) * 100)
 
-		print "Gold polysemous (%):\t{0:.4}".format(gold_polysemous / all_tags)
-		print "Gold single sense (%):\t{0:.4}".format(gold_single_senses / all_tags)
-		print "Gold closed class (%):\t{0:.4}".format(gold_closed / all_tags)
-		print "Gold unspecified (%):\t{0:.4}\n".format(gold_unspecified / all_tags)
+		print "Gold polysemous:\t{0:.2}%".format(float(gold_polysemous / all_tags) * 100)
+		print "Gold single sense:\t{0:.2}%".format(float(gold_single_senses / all_tags) * 100)
+		print "Gold closed class:\t{0:.2}%".format(float(gold_closed / all_tags) * 100)
+		print "Gold NE:\t{0:.2}%\n".format(float(gold_unspecified / all_tags) * 100)
+		print "Gold unspecified:\t{0:.2}%\n".format(float(gold_unspecified / all_tags) * 100)
 
 	def compare_sentences(self, gold_original, gold_corrected, experimental):
 		for i in range(gold_original.length):
@@ -212,6 +218,10 @@ class Disambiguator(object):
 		# if there isn't a sense...
 		if (not sense or sense == tag) and (not self.get_wordnet_pos(tag)):
 			return Sentence.CLOSED_CLASS
+
+		# are we dealing with an NE?
+		if sense == Sentence.NE:
+			return sense
 
 		# see if the sense exists in wordnet DB
 		try:
@@ -580,6 +590,10 @@ class Disambiguator(object):
 		#return the new Sentence
 		return disambiguated_sentence
 
+	def demo_classifiers(self, sentence):
+		for c in self.classifiers:
+			self.disambiguate(sentence, method=c)
+			print "\n{0}".format("-"*100)
 
 ######################################
 class Performance(object):
@@ -599,6 +613,7 @@ class Performance(object):
 class SemcorExperiment(object):
 	
 	def __init__(self):
+		self.ignore_list = [Disambiguator.UNSPECIFIED, Sentence.NE]
 		self.ignore_unspecified = True
 		print "Generating sense-annotated semcor sentences..."
 		self.gold = disambiguator.semcor_sentences()
@@ -637,7 +652,7 @@ class SemcorExperiment(object):
 		# find selective mismatches...
 		if self.ignore_unspecified:
 			for i in xrange(len(gold.senses)):
-				if (gold.senses[i] != experimental.senses[i]) and (gold.senses[i] != Disambiguator.UNSPECIFIED):
+				if (gold.senses[i] != experimental.senses[i]) and (gold.senses[i] not in self.ignore_list):
 					mismatches += 1
 					wn_tag = disambiguator.get_wordnet_pos(gold.pos_tags[i]) or Sentence.CLOSED_CLASS
 					error_list.append((gold.words[i], wn_tag, gold.senses[i], experimental.senses[i]))
@@ -711,6 +726,8 @@ class Sentence(object):
 	
 	UNKNOWN = "UNKNOWN"
 	CLOSED_CLASS = "<closed-class>"
+	#for Named Entities
+	NE = "NE"
 	
 	def __init__(self, words, pos_tags=None, senses=None):
 		#if not isinstance(words, list):
@@ -781,17 +798,19 @@ class Tests(unittest.TestCase):
 		s = Sentence(text, pos_tags=tags)
 		self.assertEqual(s.senses, correct_senses)
 
-
+##############################################################
 ##############################################################
 
 def demo():
-	examples = ["I hammered 40 nails and now my hand hurts.", 
-				"That stereo has great bass.", 
-				"I caught a huge bass."]
-	for example in examples:
-		s = Sentence(example)
-		disambiguator.polysemous_words(s)
-		disambiguator.disambiguate(s)
+	text = "time flies like an arrow."
+	tags = ['NN', 'VBZ', 'IN', 'DT', 'NN', '.']
+	s = Sentence(words=text, pos_tags=tags)
+	disambiguator.demo_classifiers(s)
+
+	text = "I hammered 5 nails and now my hand hurts."
+	tags = ['PRP', 'VBD', 'CD', 'NNS', 'CC', 'RB', 'PRP$', 'NN', 'VBZ', '.']
+	s = Sentence(text, pos_tags=tags)
+	disambiguator.demo_classifiers(s)
 
 def run_tests():
 	"""unit tests"""
@@ -801,6 +820,7 @@ def run_tests():
 	print "*"*30
 	unittest.main()
 
+##############################################################
 ##############################################################
 
 if __name__ == '__main__':
